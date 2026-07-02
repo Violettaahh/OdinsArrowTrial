@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Odin's Range: Viking Archery Pro</title>
+    <style>
+        body {
+            margin: 0;
+            background: #1a1a1a;
+            color: #fff;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        h1 {
+            margin: 5px 0;
+            color: #d4af37;
+            text-shadow: 2px 2px #000;
+        }
+        canvas {
+            border: 4px solid #5c4033;
+            background: linear-gradient(to bottom, #4682b4, #b0e0e6 65%, #556b2f 65%, #8b4513 95%);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.5);
+        }
+        .instructions {
+            margin-top: 10px;
+            color: #aaa;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>ᚠ ODIN'S RANGE ᚠ</h1>
+    <canvas id="gameCanvas" width="1000" height="500"></canvas>
+    <div class="instructions">Click and drag backward from the bow to aim. Release to loose the arrow!</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// Game States: 'MENU', 'PLAYING', 'GAMEOVER'
+let gameState = 'MENU'; 
+let difficulty = 'Medium'; 
+let score = 0;
+let lastHitText = ""; // Notifies player of ring accuracy tier
+let textTimer = 0;
+let arrowsLeft = 10;
+
+// Physics / Mechanics
+let wind = 0; 
+
+// Bow / Archer Position
+const bow = { x: 120, y: 350, radius: 40 };
+
+// Control State
+let isDragging = false;
+let dragStart = { x: 0, y: 0 };
+let dragCurrent = { x: 0, y: 0 };
+
+// Arrow State
+let arrow = {
+    x: bow.x,
+    y: bow.y,
+    vx: 0,
+    vy: 0,
+    isShot: false,
+    angle: 0,
+    length: 50
+};
+
+// Target State
+let target = {
+    x: 880,
+    y: 220,
+    radius: 45,
+    vy: 2.5
+};
+
+// Menu Buttons Regions (Dynamically repositioned to fit 1000px layout width)
+const buttons = {
+    easy: { x: 400, y: 180, w: 200, h: 45 },
+    medium: { x: 400, y: 245, w: 200, h: 45 },
+    hard: { x: 400, y: 310, w: 200, h: 45 },
+    restart: { x: 400, y: 320, w: 200, h: 45 }
+};
+
+// Ship animation variables
+let shipX = 450;
+
+function getMousePos(e) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+        x: (e.clientX - rect.left) * (canvas.width / rect.width),
+        y: (e.clientY - rect.top) * (canvas.height / rect.height)
+    };
+}
+
+// Event Listeners
+canvas.addEventListener('mousedown', (e) => {
+    const mouse = getMousePos(e);
+
+    if (gameState === 'MENU') {
+        if (mouse.x >= buttons.easy.x && mouse.x <= buttons.easy.x + buttons.easy.w && mouse.y >= buttons.easy.y && mouse.y <= buttons.easy.y + buttons.easy.h) {
+            startGame('Easy');
+        } else if (mouse.x >= buttons.medium.x && mouse.x <= buttons.medium.x + buttons.medium.w && mouse.y >= buttons.medium.y && mouse.y <= buttons.medium.y + buttons.medium.h) {
+            startGame('Medium');
+        } else if (mouse.x >= buttons.hard.x && mouse.x <= buttons.hard.x + buttons.hard.w && mouse.y >= buttons.hard.y && mouse.y <= buttons.hard.y + buttons.hard.h) {
+            startGame('Hard');
+        }
+        return;
+    }
+
+    if (gameState === 'GAMEOVER') {
+        if (mouse.x >= buttons.restart.x && mouse.x <= buttons.restart.x + buttons.restart.w && mouse.y >= buttons.restart.y && mouse.y <= buttons.restart.y + buttons.restart.h) {
+            gameState = 'MENU';
+        }
+        return;
+    }
+
+    if (gameState === 'PLAYING') {
+        if (arrow.isShot) return;
+        
+        if (Math.hypot(mouse.x - bow.x, mouse.y - bow.y) < 90) {
+            isDragging = true;
+            dragStart.x = bow.x; 
+            dragStart.y = bow.y;
+            dragCurrent.x = mouse.x;
+            dragCurrent.y = mouse.y;
+        }
+    }
+});
+
+canvas.addEventListener('mousemove', (e) => {
+    const mouse = getMousePos(e);
+
+    if (gameState === 'MENU') {
+        if ((mouse.x >= buttons.easy.x && mouse.x <= buttons.easy.x + buttons.easy.w && mouse.y >= buttons.easy.y && mouse.y <= buttons.easy.y + buttons.easy.h) ||
+            (mouse.x >= buttons.medium.x && mouse.x <= buttons.medium.x + buttons.medium.w && mouse.y >= buttons.medium.y && mouse.y <= buttons.medium.y + buttons.medium.h) ||
+            (mouse.x >= buttons.hard.x && mouse.x <= buttons.hard.x + buttons.hard.w && mouse.y >= buttons.hard.y && mouse.y <= buttons.hard.y + buttons.hard.h)) {
+            canvas.style.cursor = 'pointer';
+        } else {
+            canvas.style.cursor = 'default';
+        }
+    } else if (gameState === 'GAMEOVER') {
+        if (mouse.x >= buttons.restart.x && mouse.x <= buttons.restart.x + buttons.restart.w && mouse.y >= buttons.restart.y && mouse.y <= buttons.restart.y + buttons.restart.h) {
+            canvas.style.cursor = 'pointer';
+        } else {
+            canvas.style.cursor = 'default';
+        }
+    } else {
+        canvas.style.cursor = 'crosshair';
+    }
+
+    if (!isDragging) return;
+    dragCurrent.x = mouse.x;
+    dragCurrent.y = mouse.y;
+});
+
+canvas.addEventListener('mouseup', (e) => {
+    if (!isDragging) return;
+    isDragging = false;
+
+    const dx = dragStart.x - dragCurrent.x;
+    const dy = dragStart.y - dragCurrent.y;
+    const pullDistance = Math.hypot(dx, dy);
+    
+    if (pullDistance > 15) {
+        arrow.isShot = true;
+        arrow.vx = dx * 0.14; // Slightly boosted baseline release velocity velocity values
+        arrow.vy = dy * 0.14;
+        arrowsLeft--;
+    } else {
+        resetArrow();
+    }
+});
+
+function startGame(lvl) {
+    difficulty = lvl;
+    score = 0;
+    arrowsLeft = 10;
+    lastHitText = "";
+    textTimer = 0;
+    target.y = 200;
+    target.vy = lvl === 'Easy' ? 0 : 3.0; 
+    updateWind();
+    resetArrow();
+    gameState = 'PLAYING';
+}
+
+function updateWind() {
+    if (difficulty === 'Hard') {
+        // Balanced out wind parameters cap down from 0.20 to 0.12 max
+        wind = (Math.random() * 0.24) - 0.12; 
+    } else {
+        wind = 0;
+    }
+}
+
+function resetArrow() {
+    if (arrowsLeft <= 0 && !arrow.isShot) {
+        gameState = 'GAMEOVER';
+        return;
+    }
+    arrow.x = bow.x;
+    arrow.y = bow.y;
+    arrow.vx = 0;
+    arrow.vy = 0;
+    arrow.isShot = false;
+    updateWind();
+}
+
+// System Update Engine Execution Frame
+function update() {
+    shipX -= 0.25;
+    if (shipX < -180) shipX = canvas.width + 50;
+
+    if (textTimer > 0) textTimer--;
+
+    if (gameState === 'PLAYING') {
+        if (difficulty !== 'Easy') {
+            target.y += target.vy;
+            if (target.y - target.radius < 40 || target.y + target.radius > 345) {
+                target.vy *= -1;
+            }
+        }
+
+        if (arrow.isShot) {
+            arrow.vx += wind; 
+            arrow.x += arrow.vx;
+            arrow.y += arrow.vy;
+            arrow.vy += 0.18; // Gravity
+
+            arrow.angle = Math.atan2(arrow.vy, arrow.vx);
+
+            // Vector distance calculations
+            const distToTarget = Math.hypot(arrow.x - target.x, arrow.y - target.y);
+            
+            if (distToTarget <= target.radius) {
+                // Tiered accuracy parsing check parameters
+                if (distToTarget <= target.radius * 0.2) {
+                    score += 20; // Center Gold Core Bullseye
+                    lastHitText = "BULLSEYE! (+20)";
+                } else if (distToTarget <= target.radius * 0.55) {
+                    score += 10; // Middle Crimson Inner Ring
+                    lastHitText = "INNER RING (+10)";
+                } else {
+                    score += 5;  // Outer Wood Ring Border
+                    lastHitText = "OUTER RING (+5)";
+                }
+                textTimer = 60; // Show accuracy text feedback banner for 60 frames
+                arrow.isShot = false;
+                resetArrow();
+            }
+
+            // Boundary Miss Cleanups
+            if (arrow.x > canvas.width + 50 || arrow.y > 360 || arrow.x < -50) {
+                lastHitText = "MISS!";
+                textTimer = 45;
+                arrow.isShot = false;
+                resetArrow();
+            }
+        }
+    }
+
+    draw();
+    requestAnimationFrame(update);
+}
+
+// Global Core Graphics Layer Frame Assembler
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // --- BASE SCENERY ---
+    // Sea Water
+    ctx.fillStyle = "#2e5c8a";
+    ctx.fillRect(0, 310, canvas.width, 50);
+
+    // Render Longship
+    ctx.save();
+    ctx.translate(shipX, 305);
+    ctx.fillStyle = "#5c4033";
+    ctx.beginPath();
+    ctx.moveTo(0,0);
+    ctx.quadraticCurveTo(50, 25, 100, 0);
+    ctx.quadraticCurveTo(112, -20, 118, -25);
+    ctx.lineTo(112,-25);
+    ctx.quadraticCurveTo(100, 0, 100, 0);
+    ctx.moveTo(0,0);
+    ctx.quadraticCurveTo(-12, -20, -18, -25);
+    ctx.lineTo(-12,-25);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "#3e2723"; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(50, 5); ctx.lineTo(50, -55); ctx.stroke();
+    ctx.fillStyle = "#b22222"; ctx.fillRect(28, -55, 44, 38);
+    ctx.fillStyle = "#f0f8ff"; ctx.fillRect(44, -55, 12, 38);
+    ctx.fillStyle = "#d4af37";
+    for(let s=20; s<=80; s+=(15)) {
+        ctx.beginPath(); ctx.arc(s, 5, 5, 0, Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
+
+    // Turf Base Meadow
+    ctx.fillStyle = "#445626";
+    ctx.fillRect(0, 350, canvas.width, 150);
+
+    // Prop: Ground Broken Shield
+    ctx.save();
+    ctx.translate(650, 370);
+    ctx.fillStyle = "#6e473b";
+    ctx.beginPath(); ctx.arc(0,0, 25, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = "#222"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = "#555";   ctx.beginPath(); ctx.arc(0,0, 5, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = "#5c4033"; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(-4, 30); ctx.stroke(); 
+    ctx.restore();
+
+    // Prop: Ground Axe
+    ctx.strokeStyle = "#708090"; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(350, 395); ctx.lineTo(330, 365); ctx.stroke(); 
+    ctx.fillStyle = "#b0c4de";
+    ctx.beginPath(); ctx.moveTo(330, 365); ctx.lineTo(315, 360); ctx.lineTo(322, 380); ctx.closePath(); ctx.fill();
+    // --- END SCENERY BASE ---
+
+
+    // --- RENDERING MECHANICS CORE LAYER ---
+    // Shield Post Stand
+    ctx.strokeStyle = "#5c4033"; ctx.lineWidth = 8;
+    ctx.beginPath(); ctx.moveTo(target.x, target.y); ctx.lineTo(target.x, 360); ctx.stroke();
+
+    // Shield Target Rings Assemblies
+    ctx.lineWidth = 3; ctx.strokeStyle = "#000";
+    ctx.fillStyle = "#8b4513"; ctx.beginPath(); ctx.arc(target.x, target.y, target.radius, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); // Outer (5 pts)
+    ctx.fillStyle = "#d4af37"; ctx.beginPath(); ctx.arc(target.x, target.y, target.radius * 0.55, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); // Mid (10 pts)
+    ctx.fillStyle = "#8b0000"; ctx.beginPath(); ctx.arc(target.x, target.y, target.radius * 0.2, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); // Bullseye (20 pts)
+    ctx.fillStyle = "#71797E"; ctx.beginPath(); ctx.arc(target.x, target.y, target.radius * 0.06, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+
+    // Bow Rig
+    ctx.strokeStyle = "#d4af37"; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.arc(bow.x, bow.y, bow.radius, -Math.PI/2, Math.PI/2); ctx.stroke();
+
+    if (gameState === 'PLAYING') {
+        if (isDragging) {
+            ctx.strokeStyle = "#fff"; ctx.lineWidth = 2.5;
+            ctx.beginPath(); ctx.moveTo(bow.x, bow.y - bow.radius); ctx.lineTo(dragCurrent.x, dragCurrent.y); ctx.lineTo(bow.x, bow.y + bow.radius); ctx.stroke();
+
+            // Predictor Tracker Trajectory arc trace path line indicators
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.35)";
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            let simX = bow.x, simY = bow.y;
+            let simVx = (dragStart.x - dragCurrent.x) * 0.14;
+            let simVy = (dragStart.y - dragCurrent.y) * 0.14;
+            ctx.moveTo(simX, simY);
+            for(let i=0; i<32; i++) {
+                simVx += wind;
+                simX += simVx; simY += simVy; simVy += 0.18;
+                ctx.lineTo(simX, simY);
+            }
+            ctx.stroke(); ctx.setLineDash([]);
+        } else if (!arrow.isShot) {
+            ctx.strokeStyle = "#fff"; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(bow.x, bow.y - bow.radius); ctx.lineTo(bow.x, bow.y); ctx.lineTo(bow.x, bow.y + bow.radius); ctx.stroke();
+        }
+
+        // Active Flight Matrix Transformations Engine
+        if (!arrow.isShot || arrow.vx !== 0 || arrow.vy !== 0) {
+            ctx.save();
+            if (isDragging) {
+                let dragAngle = Math.atan2(dragStart.y - dragCurrent.y, dragStart.x - dragCurrent.x);
+                ctx.translate(bow.x, bow.y); ctx.rotate(dragAngle);
+            } else if (arrow.isShot) {
+                ctx.translate(arrow.x, arrow.y); ctx.rotate(arrow.angle);
+            } else {
+                ctx.translate(bow.x, bow.y);
+            }
+            
+            ctx.strokeStyle = "#d2b48c"; ctx.lineWidth = 4;
+            ctx.beginPath(); ctx.moveTo(-arrow.length/2, 0); ctx.lineTo(arrow.length/2, 0); ctx.stroke();
+            ctx.fillStyle = "#888"; ctx.beginPath(); ctx.moveTo(-arrow.length/2, 0); ctx.lineTo(-arrow.length/2 - 7, -6); ctx.lineTo(-arrow.length/2 + 5, -6); ctx.closePath(); ctx.fill();
+            ctx.fillStyle = "#71797E"; ctx.beginPath(); ctx.moveTo(arrow.length/2, 0); ctx.lineTo(arrow.length/2 - 10, -5); ctx.lineTo(arrow.length/2 - 10, 5); ctx.closePath(); ctx.fill();
+            ctx.restore();
+        }
+
+        // Live Scoring Feedback UI Display text labels
+        if (textTimer > 0) {
+            ctx.fillStyle = lastHitText.includes("BULLSEYE") ? "#ffeb3b" : "#fff";
+            ctx.font = "bold 20px 'Courier New'";
+            ctx.textAlign = "center";
+            ctx.fillText(lastHitText, canvas.width / 2, 80);
+            ctx.textAlign = "left";
+        }
+
+        // HUD Dashboard readout metrics values
+        ctx.fillStyle = "#fff"; ctx.font = "bold 16px 'Courier New'";
+        ctx.fillText(`SCORE: ${score}`, 25, 35);
+        ctx.fillText(`ARROWS: ${arrowsLeft}`, 25, 60);
+        ctx.fillText(`MODE: ${difficulty.toUpperCase()}`, 25, 85);
+
+        // Wind Flag UI gauge metrics readouts (Hard Difficulty Exclusive)
+        if (difficulty === 'Hard') {
+            ctx.fillStyle = "#222"; ctx.fillRect(780, 20, 190, 30);
+            ctx.strokeStyle = "#fff"; ctx.strokeRect(780, 20, 190, 30);
+            ctx.fillStyle = "#fff"; ctx.font = "12px 'Courier New'";
+            ctx.fillText("WIND DIRECTION", 790, 39);
+            
+            ctx.strokeStyle = wind > 0 ? "#00ff00" : "#ff0000";
+            ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(915, 35); ctx.lineTo(915 + (wind * 450), 35); ctx.stroke();
+        }
+    }
+
+    // --- OVERLAY: HOME CHOOSE MENU INTERFACE SCREEN ---
+    if (gameState === 'MENU') {
+        ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = "#d4af37"; ctx.font = "bold 40px 'Courier New'"; ctx.textAlign = "center";
+        ctx.fillText("SELECT YOUR TRIAL", canvas.width / 2, 110);
+
+        const drawButton = (btn, label, color) => {
+            ctx.fillStyle = "#3e2723"; ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
+            ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.strokeRect(btn.x, btn.y, btn.w, btn.h);
+            ctx.fillStyle = "#fff"; ctx.font = "bold 15px 'Courier New'";
+            ctx.fillText(label, btn.x + btn.w/2, btn.y + 28);
+        };
+
+        drawButton(buttons.easy, "EASY (STILL)", "#4caf50");
+        drawButton(buttons.medium, "MEDIUM (MOVING)", "#ffeb3b");
+        drawButton(buttons.hard, "HARD (WIND)", "#f44336");
+        ctx.textAlign = "left"; 
+    }
+
+    // --- OVERLAY: GAMEOVER PERFORMANCE HIGHLIGHT SUMMARY CARD ---
+    if (gameState === 'GAMEOVER') {
+        ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        ctx.fillStyle = "#d4af37"; ctx.font = "bold 46px 'Courier New'"; ctx.textAlign = "center";
+        ctx.fillText("VALHALLA AWAITS", canvas.width / 2, 120);
+        
+        ctx.fillStyle = "#fff"; ctx.font = "22px 'Courier New'";
+        ctx.fillText(`COMPLETED TRIAL: ${difficulty.toUpperCase()}`, canvas.width / 2, 190);
+        ctx.fillText(`FINAL RECORDED SCORE: ${score}`, canvas.width / 2, 245);
+
+        ctx.fillStyle = "#5c4033"; ctx.fillRect(buttons.restart.x, buttons.restart.y, buttons.restart.w, buttons.restart.h);
+        ctx.strokeStyle = "#d4af37"; ctx.lineWidth = 2; ctx.strokeRect(buttons.restart.x, buttons.restart.y, buttons.restart.w, buttons.restart.h);
+        ctx.fillStyle = "#fff"; ctx.font = "bold 16px 'Courier New'";
+        ctx.fillText("CHOOSE TRIAL", buttons.restart.x + buttons.restart.w/2, buttons.restart.y + 28);
+        
+        ctx.textAlign = "left";
+    }
+}
+
+// Global Core Animation Execution Framework Call Loops Initialization
+update();
+</script>
+
+</body>
+</html>
